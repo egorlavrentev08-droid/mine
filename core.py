@@ -680,3 +680,38 @@ if __name__ == "__main__":
     text += f"\n🕐 Обновлено: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     
     return text
+
+    def check_diversification(user_data: Dict) -> Optional[str]:
+    """
+    Проверить, нужно ли пользователю diversify валюты
+    
+    Returns:
+        str: сообщение-подсказка или None
+    """
+    rub = user_data['rub']
+    usd = user_data['usd']
+    eur = user_data['eur']
+    btc = user_data['btc']
+    
+    total = rub + usd + eur + btc
+    
+    if total == 0:
+        return "💡 У вас нет средств. Начните с включения RUB фермы!"
+    
+    rub_percent = rub / total * 100 if total > 0 else 0
+    
+    if rub_percent > 90:
+        return (
+            "⚠️ *Почти все ваши средства в рублях!*\n"
+            "💡 *Совет:* Обменяйте часть рублей на USD, EUR или BTC "
+            "в разделе «💱 Обмен валют» для диверсификации."
+        )
+    
+    if usd == 0 and eur == 0 and btc == 0:
+        return (
+            "💡 *У вас только рубли!*\n"
+            "🔄 Обменяйте часть на другие валюты в «💱 Обмен валют» "
+            "и включите соответствующие фермы для максимального дохода!"
+        )
+    
+    return None
