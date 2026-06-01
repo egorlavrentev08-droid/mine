@@ -681,7 +681,7 @@ if __name__ == "__main__":
     
     return text
 
-    def check_diversification(user_data: Dict) -> Optional[str]:
+def check_diversification(user_data: Dict) -> Optional[str]:
     """
     Проверить, нужно ли пользователю diversify валюты
     
@@ -715,3 +715,33 @@ if __name__ == "__main__":
         )
     
     return None
+
+@dp.message(F.text == "🏦 Мой счёт")
+async def show_balance(message: types.Message):
+    """Показать баланс пользователя"""
+    user_id = message.from_user.id
+    user_data = db.get_user(user_id)
+    rates = db.get_exchange_rates()
+    
+    balance_text = game.format_balance(user_data, rates)
+    
+    # Проверка диверсификации
+    diversification_tip = game.check_diversification(user_data)
+    if diversification_tip:
+        balance_text += f"\n\n{diversification_tip}"
+    
+    # Случайный AI-совет (30% шанс)
+    if random.random() < 0.3:
+        advice = ai_generator.get_random_advice(
+            user_id,
+            name=message.from_user.first_name,
+            currency=random.choice(["рублях", "долларах", "евро", "биткоинах"])
+        )
+        if advice:
+            balance_text += f"\n\n💡 *Совет AI:* {advice}"
+    
+    await message.answer(
+        balance_text, 
+        parse_mode="Markdown", 
+        reply_markup=main_keyboard
+                                    )
