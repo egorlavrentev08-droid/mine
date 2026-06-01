@@ -56,6 +56,168 @@ COMPLEXITY_LEVELS = {
     }
 }
 
+# ========== ОБМЕН ВАЛЮТ ==========
+
+def exchange_currency(user_id: int, from_currency: str, to_currency: str, amount: float) -> Dict:
+    """
+    Обменять одну валюту на другую по текущему курсу
+    
+    Args:
+        user_id: ID пользователя
+        from_currency: валюта, которую продаём (RUB, USD, EUR, BTC)
+        to_currency: валюта, которую покупаем
+        amount: сумма в from_currency
+        
+    Returns:
+        Dict: {
+            'success': bool,
+            'message': str,
+            'from_amount': float,
+            'to_amount': float,
+            'rate': float,
+            'fee': float,
+            'fee_amount': float
+        }
+    """
+    user = get_user(user_id)
+    rates = get_exchange_rates()
+    
+    # Проверка валют
+    if from_currency == to_currency:
+        return {
+            'success': False,
+            'message': '❌ Нельзя обменять валюту саму на себя!'
+        }
+    
+    if from_currency not in rates or to_currency not in rates:
+        return {
+            'success': False,
+            'message': '❌ Неподдерживаемая валюта!'
+        }
+    
+    # Проверка баланса
+    if user[from_currency.lower()] < amount:
+        return {
+            'success': False,
+            'message': f'❌ Недостаточно {from_currency}! У вас: {user[from_currency.lower()]:,.2f} {from_currency}'
+        }
+    
+    if amount <= 0:
+        return {
+            'success': False,
+            'message': '❌ Сумма должна быть положительной!'
+        }
+    
+    # Расчёт курса
+    from_rate = rates[from_currency]
+    to_rate = rates[to_currency]
+    
+    # Курс: сколько to_currency получим за 1 from_currency
+    exchange_rate = from_rate / to_rate
+    
+    # Комиссия зависит от сложности и валюты
+    complexity = get_user_complexity(user_id)
+    base_fee = 0.01  # 1% базовая комиссия
+    
+    # Для криптовалют комиссия выше
+    if from_currency == 'BTC' or to_currency == 'BTC':
+        base_fee = 0.02  # 2%
+    
+    # На высокой сложности комиссия ниже
+    if complexity == 'pro':
+        base_fee *= 0.5  # Скидка 50%
+    elif complexity == 'hard':
+        base_fee *= 0.75  # Скидка 25%
+    
+    # Расчёт сумм
+    fee_amount = amount * base_fee
+    amount_after_fee = amount - fee_amount
+    to_amount = round(amount_after_fee * exchange_rate, 2)
+    
+    # Для BTC больше знаков после запятой
+    if to_currency == 'BTC':
+        to_amount = round(amount_after_fee * exchange_rate, 8)
+    
+    # Выполняем обмен
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    
+    # Списываем from_currency
+    c.execute(
+        f'UPDATE users SET {from_currency.lower()} = {from_currency.lower()} - ? WHERE user_id = ?',
+        (amount, user_id)
+    )
+    
+    # Начисляем to_currency
+    c.execute(
+        f'UPDATE users SET {to_currency.lower()} = {to_currency.lower()} + ? WHERE user_id = ?',
+        (to_amount, user_id)
+    )
+    
+    conn.commit()
+    conn.close()
+    
+    # Логируем транзакцию
+    add_transaction(
+        user_id, 'exchange', f'{from_currency}→{to_currency}',
+        amount,
+        f'Обмен: {amount:,.2f} {from_currency} → {to_amount:,.2f} {to_currency} '
+        f'(курс: {exchange_rate:.4f}, комиссия: {fee_amount:,.2f} {from_currency})'
+    )
+    
+    return {
+        'success': True,
+        'message': f'✅ Обмен выполнен успешно!',
+        'from_amount': amount,
+        'to_amount': to_amount,
+        'rate': exchange_rate,
+        'fee': base_fee * 100,
+        'fee_amount': fee_amount
+    }
+
+def get_exchange_preview(from_currency: str, to_currency: str, amount: float, user_id: int) -> Dict:
+    """
+    Получить предварительный расчёт обмена без выполнения
+    
+    Args:
+        from_currency: валюта продажи
+        to_currency: валюта покупки
+        amount: сумма
+        user_id: ID пользователя (для расчёта комиссии)
+        
+    Returns:
+        Dict с расчётом
+    """
+    rates = get_exchange_rates()
+    
+    if from_currency not in rates or to_currency not in rates:
+        return {'success': False, 'message': 'Неверная валюта'}
+    
+    from_rate = rates[from_currency]
+    to_rate = rates[to_currency]
+    exchange_rate = from_rate / to_rate
+    
+    complexity = get_user_complexity(user_id)
+    base_fee = 0.02 if (from_currency == 'BTC' or to_currency == 'BTC') else 0.01
+    
+    if complexity == 'pro':
+        base_fee *= 0.5
+    elif complexity == 'hard':
+        base_fee *= 0.75
+    
+    fee_amount = amount * base_fee
+    amount_after_fee = amount - fee_amount
+    to_amount = round(amount_after_fee * exchange_rate, 8 if to_currency == 'BTC' else 2)
+    
+    return {
+        'success': True,
+        'from_amount': amount,
+        'to_amount': to_amount,
+        'rate': exchange_rate,
+        'fee_percent': base_fee * 100,
+        'fee_amount': fee_amount
+    }
+    
 # ========== ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ ==========
 
 def init_db():
