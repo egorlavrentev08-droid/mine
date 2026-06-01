@@ -18,6 +18,7 @@ from aiogram.types import (
     CallbackQuery
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from decimal import Decimal, ROUND_DOWN
 
 import database as db
 import core as game
@@ -40,6 +41,231 @@ dp = Dispatcher()
 
 # Хранилище состояний пользователей (для FSM)
 user_states = {}
+
+# В начало файла добавим импорт для работы с числами
+
+# ========== КЛАВИАТУРА ОБМЕНА ==========
+
+def get_exchange_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура выбора валют для обмена"""
+    currencies = ['RUB', 'USD', 'EUR', 'BTC']
+    keyboard = []
+    
+    for from_cur in currencies:
+        row = []
+        for to_cur in currencies:
+            if from_cur != to_cur:
+                row.append(InlineKeyboardButton(
+                    text=f"{from_cur} → {to_cur}",
+                    callback_data=f"exchange_{from_cur}_{to_cur}"
+                ))
+        if row:
+            keyboard.append(row)
+    
+    keyboard.append([InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_main")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def get_exchange_amount_keyboard(from_cur: str, to_cur: str) -> InlineKeyboardMarkup:
+    """Клавиатура с预设ными суммами для обмена"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="25%", callback_data=f"ex_amount_{from_cur}_{to_cur}_25"),
+            InlineKeyboardButton(text="50%", callback_data=f"ex_amount_{from_cur}_{to_cur}_50"),
+            InlineKeyboardButton(text="75%", callback_data=f"ex_amount_{from_cur}_{to_cur}_75"),
+            InlineKeyboardButton(text="100%", callback_data=f"ex_amount_{from_cur}_{to_cur}_100")
+        ],
+        [InlineKeyboardButton(text="🔢 Своя сумма", callback_data=f"ex_custom_{from_cur}_{to_cur}")],
+        [InlineKeyboardButton(text="🔙 Назад к выбору валют", callback_data="exchange_menu")]
+    ])
+
+# ========== ОБРАБОТЧИКИ ОБМЕНА ==========
+
+@dp.message(F.text == "💱 Обмен валют")
+async def exchange_menu(message: types.Message):
+    """Меню обмена валют"""
+    user_id = message.from_user.id
+    rates = db.get_exchange_rates()
+    
+    text = "💱 *Обмен валют*\n\n"
+    text += "*Текущие курсы (к RUB):*\n"
+    text += f"├ USD: {rates['USD']:,.2f} ₽\n"
+    text += f"├ EUR: {rates['EUR']:,.2f} ₽\n"
+    text += f"└ BTC: {rates['BTC']:,.2f} ₽\n\n"
+    text += "*Комиссия:*\n"
+    text += "├ Обычные валюты: 1%\n"
+    text += "├ Криптовалюты: 2%\n"
+    text += "└ Скидка на высокой сложности до 50%\n\n"
+    text += "Выберите направление обмена:"
+    
+    await message.answer(text, parse_mode="Markdown", reply_markup=get_exchange_keyboard())
+
+@dp.callback_query(F.data.startswith("exchange_"))
+async def select_exchange_pair(callback: CallbackQuery):
+    """Выбор пары валют для обмена"""
+    parts = callback.data.split("_")
+    
+    if len(parts) == 2 and parts[1] == "menu":
+        # Вернуться в меню обмена
+        await exchange_menu(callback.message)
+        await callback.message.delete()
+        await callback.answer()
+        return
+    
+    from_cur = parts[1]
+    to_cur = parts[2]
+    
+    user_id = callback.from_user.id
+    user_data = db.get_user(user_id)
+    balance = user_data[from_cur.lower()]
+    
+    text = f"💱 *Обмен: {from_cur} → {to_cur}*\n\n"
+    text += f"💰 Ваш баланс {from_cur}: *{balance:,.2f}*\n\n"
+    text += "Выберите сумму для обмена\n"
+    text += "или введите свою:"
+    
+    await callback.message.edit_text(
+        text,
+        parse_mode="Markdown",
+        reply_markup=get_exchange_amount_keyboard(from_cur, to_cur)
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("ex_amount_"))
+async def exchange_percent(callback: CallbackQuery):
+    """Обменять процент от баланса"""
+    parts = callback.data.split("_")
+    from_cur = parts[2]
+    to_cur = parts[3]
+    percent = int(parts[4])
+    
+    user_id = callback.from_user.id
+    user_data = db.get_user(user_id)
+    balance = user_data[from_cur.lower()]
+    
+    amount = round(balance * percent / 100, 2)
+    
+    await execute_exchange(callback, user_id, from_cur, to_cur, amount)
+
+@dp.callback_query(F.data.startswith("ex_custom_"))
+async def exchange_custom(callback: CallbackQuery):
+    """Ввод своей суммы для обмена"""
+    parts = callback.data.split("_")
+    from_cur = parts[2]
+    to_cur = parts[3]
+    
+    user_id = callback.from_user.id
+    user_states[user_id] = {
+        'type': 'exchange',
+        'from_cur': from_cur,
+        'to_cur': to_cur
+    }
+    
+    await callback.message.answer(
+        f"💱 *Введите сумму {from_cur} для обмена на {to_cur}*\n\n"
+        f"Пример: 1000\n\n"
+        f"Отправьте /cancel для отмены.",
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+async def execute_exchange(callback, user_id, from_cur, to_cur, amount):
+    """Выполнить обмен валют"""
+    result = db.exchange_currency(user_id, from_cur, to_cur, amount)
+    
+    if result['success']:
+        text = f"""
+✅ *Обмен выполнен успешно!*
+
+💱 *Детали операции:*
+├ Продано: {result['from_amount']:,.2f} {from_cur}
+├ Куплено: {result['to_amount']:,.2f} {to_cur}
+├ Курс: 1 {from_cur} = {result['rate']:,.4f} {to_cur}
+├ Комиссия: {result['fee']}% ({result['fee_amount']:,.2f} {from_cur})
+└ Сложность: {db.COMPLEXITY_LEVELS[db.get_user_complexity(user_id)]['name']}
+
+💡 *Совет:* На высокой сложности комиссия ниже!
+"""
+        
+        # AI комментарий
+        ai_comment = ai_generator.generate_phrase(
+            user_id, "random_advice",
+            name=callback.from_user.first_name,
+            currency=to_cur
+        )
+        if ai_comment:
+            text += f"\n💬 {ai_comment}"
+        
+        await callback.message.edit_text(
+            text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Ещё обмен", callback_data="exchange_menu")],
+                [InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_main")]
+            ])
+        )
+    else:
+        await callback.answer(result['message'], show_alert=True)
+
+@dp.message(F.text.regexp(r'^\d+\.?\d*$'))
+async def handle_exchange_amount(message: types.Message):
+    """Обработка ввода суммы для обмена"""
+    user_id = message.from_user.id
+    state = user_states.get(user_id)
+    
+    if not state or state.get('type') != 'exchange':
+        return  # Не в режиме обмена
+    
+    try:
+        amount = float(message.text)
+        if amount <= 0:
+            await message.answer("❌ Сумма должна быть положительной!")
+            return
+        
+        from_cur = state['from_cur']
+        to_cur = state['to_cur']
+        
+        # Предпросмотр обмена
+        preview = db.get_exchange_preview(from_cur, to_cur, amount, user_id)
+        
+        if preview['success']:
+            text = f"""
+📋 *Предпросмотр обмена*
+
+💱 {from_cur} → {to_cur}
+├ Сумма: {preview['from_amount']:,.2f} {from_cur}
+├ Получите: {preview['to_amount']:,.2f} {to_cur}
+├ Курс: 1 {from_cur} = {preview['rate']:,.4f} {to_cur}
+└ Комиссия: {preview['fee_percent']}% ({preview['fee_amount']:,.2f} {from_cur})
+
+Подтвердите обмен:"""
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"ex_confirm_{from_cur}_{to_cur}_{amount}"),
+                    InlineKeyboardButton(text="❌ Отмена", callback_data="exchange_menu")
+                ]
+            ])
+            
+            await message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
+        else:
+            await message.answer(f"❌ {preview['message']}")
+        
+        # Очищаем состояние
+        del user_states[user_id]
+        
+    except ValueError:
+        await message.answer("❌ Введите число!")
+
+@dp.callback_query(F.data.startswith("ex_confirm_"))
+async def confirm_exchange(callback: CallbackQuery):
+    """Подтверждение обмена"""
+    parts = callback.data.split("_")
+    from_cur = parts[2]
+    to_cur = parts[3]
+    amount = float(parts[4])
+    
+    await execute_exchange(callback, callback.from_user.id, from_cur, to_cur, amount)
 
 # ========== КЛАВИАТУРЫ ==========
 
