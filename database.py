@@ -223,22 +223,20 @@ def get_exchange_preview(from_currency: str, to_currency: str, amount: float, us
 def init_db():
     """
     Инициализация базы данных и создание таблиц, если они не существуют.
-    Безопасно для многократного вызова.
     """
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     
-    # Включаем поддержку внешних ключей
     c.execute("PRAGMA foreign_keys = ON")
     
-    # Таблица пользователей
+    # Таблица пользователей с новыми значениями по умолчанию
     c.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
-            rub REAL DEFAULT 1000.0,
-            usd REAL DEFAULT 1000.0,
-            eur REAL DEFAULT 1000.0,
-            btc REAL DEFAULT 1000.0,
+            rub REAL DEFAULT 10000.0,  -- Было 1000.0
+            usd REAL DEFAULT 0.0,      -- Было 1000.0
+            eur REAL DEFAULT 0.0,      -- Было 1000.0
+            btc REAL DEFAULT 0.0,      -- Было 1000.0
             auditor_streak INTEGER DEFAULT 0,
             last_check DATE,
             total_collected INTEGER DEFAULT 0,
