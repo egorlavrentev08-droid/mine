@@ -655,3 +655,28 @@ if __name__ == "__main__":
     print(f"✅ 1000000000 -> {format_large_number(1000000000)}")
     
     print("\n✅ Все тесты пройдены!")
+
+    def format_exchange_rates(rates: Dict) -> str:
+    """
+    Форматировать курсы валют для отображения
+    
+    Args:
+        rates: словарь курсов из БД
+        
+    Returns:
+        str: отформатированный текст
+    """
+    text = "📊 *Текущие курсы валют*\n\n"
+    text += "*Относительно RUB:*\n"
+    text += f"├ 💵 USD: {rates['USD']:,.2f} ₽\n"
+    text += f"├ 💶 EUR: {rates['EUR']:,.2f} ₽\n"
+    text += f"└ ₿ BTC: {rates['BTC']:,.2f} ₽\n\n"
+    
+    text += "*Кросс-курсы:*\n"
+    text += f"├ EUR/USD: {rates['EUR']/rates['USD']:,.4f}\n"
+    text += f"├ BTC/USD: {rates['BTC']/rates['USD']:,.2f}\n"
+    text += f"└ BTC/EUR: {rates['BTC']/rates['EUR']:,.2f}\n"
+    
+    text += f"\n🕐 Обновлено: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+    
+    return text
