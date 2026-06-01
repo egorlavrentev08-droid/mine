@@ -274,7 +274,8 @@ main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🏦 Мой счёт"), KeyboardButton(text="⚙️ Мои фермы")],
         [KeyboardButton(text="📚 Бухгалтерия"), KeyboardButton(text="📈 Статистика")],
-        [KeyboardButton(text="🤖 Настройки AI"), KeyboardButton(text="🎯 Сложность")]
+        [KeyboardButton(text="💱 Обмен валют"), KeyboardButton(text="🎯 Сложность")],
+        [KeyboardButton(text="🤖 Настройки AI")]
     ],
     resize_keyboard=True,
     input_field_placeholder="Выберите действие..."
